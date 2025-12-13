@@ -1,19 +1,24 @@
 // server.js (EN RENDER)
 import express from 'express';
 import cors from 'cors';
-// 1. IMPORTANTE: Añadimos DataPacket_Kind a los imports
+// IMPORTANTE: Añadimos DataPacket_Kind a los imports
 import { AccessToken, RoomServiceClient, DataPacket_Kind } from 'livekit-server-sdk';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
 const app = express();
+
+// --- CORRECCIÓN CORS EXTREMA ---
+// Permitimos todo para desarrollo.
 app.use(cors({
   origin: '*', // Permitir cualquier origen
   methods: ['GET', 'POST', 'OPTIONS'], // Permitir estos métodos
   allowedHeaders: ['Content-Type', 'Authorization'] // Permitir estos headers
 }));
-app.options('*', cors()); 
+
+// ELIMINADO: La línea app.options('*', cors()) causaba el error de "Missing parameter name"
+// El app.use de arriba ya maneja esto automáticamente.
 
 app.use(express.json());
 
@@ -82,17 +87,18 @@ app.post('/minecraft-data', async (req, res) => {
     const encoder = new TextEncoder();
     const payload = encoder.encode(strData);
 
+    // Usamos DataPacket_Kind.RELIABLE
     await roomService.sendData(
-        'minecraft-global',
-        payload,
-        DataPacket_Kind.RELIABLE
+        'minecraft-global',      
+        payload,                 
+        DataPacket_Kind.RELIABLE 
     );
 
   } catch (error) {
-    // CORRECCIÓN: Si el error es 404 (Room not found), lo ignoramos silenciosamente
+    // Si el error es 404 (Room not found), lo ignoramos silenciosamente
     // porque significa que no hay nadie conectado en la web.
     if (error.status === 404 || error.code === 'not_found') {
-       // Opcional: console.log("Sala inactiva, esperando usuarios...");
+       // Nada que hacer, sala vacía
     } else {
        console.error("Error enviando a LiveKit:", error);
     }
@@ -114,6 +120,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Auth Server corriendo en puerto ${PORT}`);
 });
-
-
-
