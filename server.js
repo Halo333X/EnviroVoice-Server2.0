@@ -13,6 +13,8 @@ app.use(cors({
   methods: ['GET', 'POST', 'OPTIONS'], // Permitir estos métodos
   allowedHeaders: ['Content-Type', 'Authorization'] // Permitir estos headers
 }));
+app.options('*', cors()); 
+
 app.use(express.json());
 
 // Credenciales
@@ -112,5 +114,6 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Auth Server corriendo en puerto ${PORT}`);
 });
+
 
 
