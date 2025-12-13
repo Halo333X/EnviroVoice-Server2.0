@@ -76,16 +76,20 @@ app.post('/minecraft-data', async (req, res) => {
     const encoder = new TextEncoder();
     const payload = encoder.encode(strData);
 
-    // 2. CORRECCIÓN AQUÍ: Usamos DataPacket_Kind.RELIABLE en lugar del objeto {reliable:true}
     await roomService.sendData(
-        'minecraft-global',      // Sala
-        payload,                 // Datos (Uint8Array)
-        DataPacket_Kind.RELIABLE // Tipo de paquete (Enum correcto)
+        'minecraft-global',
+        payload,
+        DataPacket_Kind.RELIABLE
     );
 
   } catch (error) {
-    console.error("Error enviando a LiveKit:", error);
-    // No detenemos la respuesta al addon aunque LiveKit falle
+    // CORRECCIÓN: Si el error es 404 (Room not found), lo ignoramos silenciosamente
+    // porque significa que no hay nadie conectado en la web.
+    if (error.status === 404 || error.code === 'not_found') {
+       // Opcional: console.log("Sala inactiva, esperando usuarios...");
+    } else {
+       console.error("Error enviando a LiveKit:", error);
+    }
   }
 
   // B. Responder al Addon
@@ -104,3 +108,4 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Auth Server corriendo en puerto ${PORT}`);
 });
+
