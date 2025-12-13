@@ -10,15 +10,20 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Tus credenciales de LiveKit (Configúralas en las Variables de Entorno de Render)
+// Credenciales
 const LK_API_KEY = process.env.LIVEKIT_API_KEY;
 const LK_API_SECRET = process.env.LIVEKIT_API_SECRET;
-const LK_URL = process.env.LIVEKIT_URL; // wss://tu-proyecto.livekit.cloud
+const LK_URL = process.env.LIVEKIT_URL;
 
-// Cliente para mandar mensajes a la sala desde el servidor
 const roomService = new RoomServiceClient(LK_URL, LK_API_KEY, LK_API_SECRET);
 
-// 1. ENDPOINT: Generar Token (El frontend llama a esto)
+// MEMORIA TEMPORAL: Guardamos el estado de voz de cada jugador aquí.
+// Formato: { "Steve": { isTalking: true, isMuted: false }, "Alex": ... }
+let globalVoiceStates = {};
+
+// ---------------------------------------------------------
+// 1. ENDPOINT: Generar Token (Para que React entre a la sala)
+// ---------------------------------------------------------
 app.post('/token', async (req, res) => {
   const { roomName, participantName } = req.body;
 
@@ -38,35 +43,61 @@ app.post('/token', async (req, res) => {
   });
 
   const token = await at.toJwt();
-  res.json({ token, wsUrl: LK_URL }); // Devolvemos el token Y la URL de LiveKit
+  res.json({ token, wsUrl: LK_URL });
 });
 
-// 2. ENDPOINT: Recibir datos de Minecraft
-app.post('/minecraft-data', async (req, res) => {
-  const mcData = req.body; // { players: [...], ... }
+// ---------------------------------------------------------
+// 2. ENDPOINT: Estado de Voz (React le avisa al server)
+// ---------------------------------------------------------
+// React llama a esto cada vez que el usuario empieza/deja de hablar o se mutea
+app.post('/voice-status', (req, res) => {
+  const { gamertag, isTalking, isMuted } = req.body;
   
-  // Aquí ocurre la magia: Enviamos estos datos a TODOS en la sala LiveKit
+  if (gamertag) {
+    globalVoiceStates[gamertag] = { isTalking, isMuted };
+    // Opcional: console.log(`🎤 ${gamertag}: ${isTalking ? 'Hablando' : 'Silencio'}`);
+  }
+  
+  res.json({ success: true });
+});
+
+// ---------------------------------------------------------
+// 3. ENDPOINT: Datos de Minecraft (Addon <-> Server <-> React)
+// ---------------------------------------------------------
+app.post('/minecraft-data', async (req, res) => {
+  const mcBody = req.body; // { data: {...}, config: { maxDistance: 15 } }
+  
+  // A. Reenviar datos de MC a LiveKit (Para que React sepa si hay cueva)
   try {
     const strData = JSON.stringify({
       type: 'minecraft-update',
-      data: mcData
+      data: mcBody.data,
+      config: mcBody.config // Pasamos también la config a React
     });
     
-    // Codificar a Uint8Array para LiveKit
     const encoder = new TextEncoder();
     const payload = encoder.encode(strData);
 
-    // Enviar a la sala "minecraft-global" (o hazlo dinámico si quieres)
     await roomService.sendData('minecraft-global', payload, {
-      reliable: true // Asegura que llegue el paquete
+      reliable: true
     });
-
-    console.log("📦 Datos de MC re-enviados a LiveKit");
-    res.json({ success: true });
   } catch (error) {
-    console.error("Error enviando datos a LiveKit:", error);
-    res.status(500).json({ success: false });
+    console.error("Error enviando a LiveKit:", error);
   }
+
+  // B. Responder al Addon con los estados de voz (Para actualizar Nametags)
+  // Convertimos el objeto de memoria a un array limpio
+  const voiceStatesArray = Object.keys(globalVoiceStates).map(key => ({
+      gamertag: key,
+      ...globalVoiceStates[key]
+  }));
+
+  // Limpiamos estados muy viejos si quisieras, pero por ahora lo dejamos simple.
+  
+  res.json({ 
+      success: true,
+      voiceStates: voiceStatesArray // El addon leerá esto en Socket.js
+  });
 });
 
 const PORT = process.env.PORT || 3000;
