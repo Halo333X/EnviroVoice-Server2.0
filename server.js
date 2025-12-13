@@ -10,7 +10,7 @@ const app = express();
 
 // Configuración CORS Simple y Robusta
 app.use(cors({
-  origin: '*', // Permitir todo (Ngrok, Localhost, Vercel)
+  origin: '*', 
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
@@ -24,8 +24,22 @@ const LK_URL = process.env.LIVEKIT_URL;
 
 const roomService = new RoomServiceClient(LK_URL, LK_API_KEY, LK_API_SECRET);
 
-// Memoria temporal para el estado de voz (Quién habla, quién está muteado)
-let globalVoiceStates = {};
+// --- MEMORIA TEMPORAL ---
+let globalVoiceStates = {};   // Estado de voz (Web -> Backend)
+let lastMinecraftData = null; // Última info recibida del juego (Addon -> Backend)
+let lastUpdateTime = null;    // Para saber cuándo fue el último latido
+
+// =========================================================
+// NUEVO: ENDPOINT GET PARA DEPURACIÓN (Lo que pediste)
+// =========================================================
+app.get('/minecraft-data', (req, res) => {
+  res.json({
+    status: 'online',
+    last_update_time: lastUpdateTime,
+    voice_states_memory: globalVoiceStates, // Lo que dice la Web (quién habla)
+    minecraft_data_memory: lastMinecraftData // Lo que dice el Addon (posiciones)
+  });
+});
 
 // 1. ENDPOINT: Generar Token
 app.post('/token', async (req, res) => {
@@ -65,6 +79,11 @@ app.post('/voice-status', (req, res) => {
 app.post('/minecraft-data', async (req, res) => {
   const mcBody = req.body; 
   
+  // --- GUARDAR EN MEMORIA PARA EL GET (NUEVO) ---
+  lastMinecraftData = mcBody;
+  lastUpdateTime = new Date().toISOString();
+  // ----------------------------------------------
+
   // A. Enviar a LiveKit (Sala React)
   try {
     const strData = JSON.stringify({
@@ -79,11 +98,10 @@ app.post('/minecraft-data', async (req, res) => {
     await roomService.sendData(
         'minecraft-global',
         payload,
-        DataPacket_Kind.RELIABLE // <--- Importante: Usar el Enum correcto
+        DataPacket_Kind.RELIABLE 
     );
 
   } catch (error) {
-    // Ignoramos error 404 si la sala está vacía
     if (error.status !== 404 && error.code !== 'not_found') {
        console.error("Error LiveKit:", error);
     }
