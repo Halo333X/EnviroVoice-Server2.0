@@ -7,11 +7,13 @@ dotenv.config();
 
 const app = express();
 
-app.use(cors({ 
-    origin: true,
-    credentials: true,
-    methods: ['GET', 'POST', 'OPTIONS'] 
+app.use(cors({
+  origin: '*', // Permite conexiones desde Vercel, Localhost, o la casa de tu amigo
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: false // IMPORTANTE: Ponlo en false si usas '*', no lo necesitamos true
 }));
+app.options('*', cors());
 app.use(express.json());
 
 const LK_API_KEY = process.env.LIVEKIT_API_KEY;
@@ -124,5 +126,6 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
 
 
