@@ -13,7 +13,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: false // IMPORTANTE: Ponlo en false si usas '*', no lo necesitamos true
 }));
-app.options('*', cors());
+app.options('(.*)', cors());
 app.use(express.json());
 
 const LK_API_KEY = process.env.LIVEKIT_API_KEY;
@@ -126,6 +126,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
 
 
 
