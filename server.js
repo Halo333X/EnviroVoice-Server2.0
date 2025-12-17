@@ -7,7 +7,11 @@ dotenv.config();
 
 const app = express();
 
-app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'] }));
+app.use(cors({ 
+    origin: true,
+    credentials: true,
+    methods: ['GET', 'POST', 'OPTIONS'] 
+}));
 app.use(express.json());
 
 const LK_API_KEY = process.env.LIVEKIT_API_KEY;
@@ -120,4 +124,5 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
 
