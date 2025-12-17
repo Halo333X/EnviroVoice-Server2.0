@@ -8,12 +8,11 @@ dotenv.config();
 const app = express();
 
 app.use(cors({
-  origin: '*', // Permite conexiones desde Vercel, Localhost, o la casa de tu amigo
+  origin: '*', 
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: false // IMPORTANTE: Ponlo en false si usas '*', no lo necesitamos true
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
-app.options(/.*/, cors());
+
 app.use(express.json());
 
 const LK_API_KEY = process.env.LIVEKIT_API_KEY;
@@ -22,113 +21,138 @@ const LK_URL = process.env.LIVEKIT_URL;
 
 const roomService = new RoomServiceClient(LK_URL, LK_API_KEY, LK_API_SECRET);
 
-// MEMORIA (Guardamos las claves siempre en minúsculas para evitar errores)
-let globalVoiceStates = {};   
-let lastMinecraftData = null; 
+// --- MEMORIA TEMPORAL ---
+let globalVoiceStates = {};   // Quién está hablando/muteado
+let lastMinecraftData = null; // Posiciones del juego
 let lastUpdateTime = null;    
+
+// NUEVO: Memoria para saber si están conectados a la llamada
+// Formato: { "Gamertag": true/false }
 let globalConnectionStates = {}; 
 
-// --- GARBAGE COLLECTOR ---
-setInterval(() => {
-    const now = Date.now();
-    Object.keys(globalConnectionStates).forEach(key => { // 'key' ya estará en minúsculas
-        if (globalConnectionStates[key].connected) {
-            if (now - globalConnectionStates[key].lastHeartbeat > 20000) {
-                console.log(`💀 [TIMEOUT] ${key} desconectado.`);
-                globalConnectionStates[key].connected = false;
-            }
-        }
+// =========================================================
+// 1. ENDPOINT STATUS (Corregido para GET y POST)
+// =========================================================
+
+// A. Para que TÚ puedas ver los datos desde el navegador (Debugging)
+app.get('/status', (req, res) => {
+    res.json({
+        info: "Estado de conexión de jugadores (Buzón)",
+        states: globalConnectionStates
     });
-}, 5000);
+});
 
-// --- ENDPOINTS ---
-
+// B. Para que la WEB envíe el estado (Esto usa tu GameRoom.jsx)
 app.post('/status', (req, res) => {
     const { player, inVoice } = req.body;
     
     if (player) {
-        // LOG DE DEPURACIÓN
-        console.log(`💓 Heartbeat recibido: ${player} (Conectado: ${inVoice})`);
-
-        // GUARDAMOS EN MINÚSCULAS
-        globalConnectionStates[player.toLowerCase()] = {
-            connected: inVoice,
-            lastHeartbeat: Date.now()
-        };
-    } else {
-        console.warn("⚠️ Heartbeat recibido SIN JUGADOR");
+        // Guardamos el estado en memoria
+        globalConnectionStates[player] = inVoice;
+        console.log(`📡 Status Update: ${player} está en llamada? ${inVoice}`);
     }
+    
+    // NOTA: Quitamos 'minecraftSocket' porque no existe aquí.
+    // Minecraft leerá esto cuando haga su petición a /minecraft-data
+    
     res.sendStatus(200);
 });
 
-app.post('/voice-status', (req, res) => {
-    const { gamertag, isTalking, isMuted } = req.body;
-    if (gamertag) {
-        // GUARDAMOS EN MINÚSCULAS
-        globalVoiceStates[gamertag.toLowerCase()] = { isTalking, isMuted };
-    }
-    res.json({ success: true });
+// =========================================================
+// OTROS ENDPOINTS
+// =========================================================
+
+app.get('/minecraft-data', (req, res) => {
+  res.json({
+    status: 'online',
+    last_update_time: lastUpdateTime,
+    voice_states_memory: globalVoiceStates, 
+    connection_states_memory: globalConnectionStates, // <--- Añadido para debug
+    minecraft_data_memory: lastMinecraftData 
+  });
 });
 
-// EL CORAZÓN DEL SISTEMA
+app.post('/token', async (req, res) => {
+  const { roomName, participantName } = req.body;
+
+  if (!roomName || !participantName) {
+    return res.status(400).json({ error: 'Faltan datos' });
+  }
+
+  const at = new AccessToken(LK_API_KEY, LK_API_SECRET, {
+    identity: participantName,
+  });
+
+  at.addGrant({
+    roomJoin: true,
+    room: roomName,
+    canPublish: true,
+    canSubscribe: true,
+  });
+
+  const token = await at.toJwt();
+  res.json({ token, wsUrl: LK_URL });
+});
+
+app.post('/voice-status', (req, res) => {
+  const { gamertag, isTalking, isMuted } = req.body;
+  if (gamertag) {
+    globalVoiceStates[gamertag] = { isTalking, isMuted };
+  }
+  res.json({ success: true });
+});
+
+// 3. ENDPOINT: Datos de Minecraft (EL PUNTO CLAVE)
 app.post('/minecraft-data', async (req, res) => {
   const mcBody = req.body; 
+  
   lastMinecraftData = mcBody;
   lastUpdateTime = new Date().toISOString();
 
   // A. Enviar a LiveKit
   try {
-    const strData = JSON.stringify({ type: 'minecraft-update', data: mcBody.data, config: mcBody.config });
+    const strData = JSON.stringify({
+      type: 'minecraft-update',
+      data: mcBody.data,
+      config: mcBody.config
+    });
+    
     const encoder = new TextEncoder();
-    await roomService.sendData('minecraft-global', encoder.encode(strData), DataPacket_Kind.RELIABLE);
-  } catch (error) {}
+    const payload = encoder.encode(strData);
 
-  // B. COMPARACIÓN INTELIGENTE (Case Insensitive)
-  // Obtenemos la lista de jugadores REALES que están en el servidor de Minecraft
-  const playersInWorld = Object.keys(mcBody.data || {});
-  
-  const finalStates = [];
+    await roomService.sendData(
+        'minecraft-global',
+        payload,
+        DataPacket_Kind.RELIABLE 
+    );
 
-  playersInWorld.forEach(gamertag => {
-      // 1. Convertimos el nombre real de Minecraft a minúsculas para buscar en nuestra "base de datos"
-      const lowerTag = gamertag.toLowerCase();
+  } catch (error) {
+    if (error.status !== 404 && error.code !== 'not_found') {
+       console.error("Error LiveKit:", error);
+    }
+  }
 
-      // 2. Buscamos datos usando la llave en minúsculas
-      const voiceState = globalVoiceStates[lowerTag] || { isTalking: false, isMuted: false };
-      const connectionData = globalConnectionStates[lowerTag];
-      const isConnectedToCall = connectionData ? connectionData.connected : false;
+  // B. Responder al Addon con TODO (Voz + Conexión)
+  const voiceStatesArray = Object.keys(globalVoiceStates).map(key => ({
+      gamertag: key,
+      ...globalVoiceStates[key]
+  }));
 
-      // 3. Respondemos usando 'gamertag' (el nombre original con mayúsculas)
-      // Esto es CRUCIAL para que el Addon pueda encontrar al jugador en su propio mapa.
-      finalStates.push({
-          gamertag: gamertag, 
-          isTalking: voiceState.isTalking,
-          isMuted: voiceState.isMuted,
-          isDisconnected: !isConnectedToCall // Si no lo encontramos o es false -> Desconectado
-      });
-  });
+  // NUEVO: Convertimos el mapa de conexión a array para el addon
+  // El Addon debe leer esto para saber si poner el icono de "Desconectado"
+  const connectionStatesArray = Object.keys(globalConnectionStates).map(key => ({
+      gamertag: key,
+      connected: globalConnectionStates[key]
+  }));
   
   res.json({ 
       success: true,
-      states: finalStates 
+      voiceStates: voiceStatesArray,
+      connectionStates: connectionStatesArray // <--- AQUÍ LE AVISAMOS A MINECRAFT
   });
-});
-
-// ... (El endpoint /token se queda igual) ...
-app.post('/token', async (req, res) => {
-  const { roomName, participantName } = req.body;
-  const at = new AccessToken(LK_API_KEY, LK_API_SECRET, { identity: participantName });
-  at.addGrant({ roomJoin: true, room: roomName, canPublish: true, canSubscribe: true });
-  res.json({ token: await at.toJwt(), wsUrl: LK_URL });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
-
-
-
-
-
-
