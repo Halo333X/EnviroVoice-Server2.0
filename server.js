@@ -39,12 +39,18 @@ setInterval(() => {
 
 app.post('/status', (req, res) => {
     const { player, inVoice } = req.body;
+    
     if (player) {
+        // LOG DE DEPURACIÓN
+        console.log(`💓 Heartbeat recibido: ${player} (Conectado: ${inVoice})`);
+
         // GUARDAMOS EN MINÚSCULAS
         globalConnectionStates[player.toLowerCase()] = {
             connected: inVoice,
             lastHeartbeat: Date.now()
         };
+    } else {
+        console.warn("⚠️ Heartbeat recibido SIN JUGADOR");
     }
     res.sendStatus(200);
 });
@@ -114,3 +120,4 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
