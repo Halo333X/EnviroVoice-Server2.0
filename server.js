@@ -17,22 +17,17 @@ const LK_URL = process.env.LIVEKIT_URL;
 const roomService = new RoomServiceClient(LK_URL, LK_API_KEY, LK_API_SECRET);
 
 // MEMORIA
-let globalVoiceStates = {};   
-let lastMinecraftData = null; 
-let lastUpdateTime = null;    
+let globalVoiceStates = {};   // { "Gamertag": { isTalking: true, isMuted: false } }
+let globalConnectionStates = {}; // { "Gamertag": { connected: true, lastHeartbeat: 123 } }
 
-// { "Gamertag": { connected: true, lastHeartbeat: 1234567890 } }
-let globalConnectionStates = {}; 
-
-// --- GARBAGE COLLECTOR (Limpieza automática) ---
-// Si un jugador no manda señal en 20s, lo marcamos como desconectado
+// --- GARBAGE COLLECTOR (Limpieza automática de conexiones de voz) ---
 setInterval(() => {
     const now = Date.now();
     Object.keys(globalConnectionStates).forEach(player => {
         if (globalConnectionStates[player].connected) {
-            // Si pasaron más de 20s desde el último latido
+            // Si pasaron más de 20s sin latido, lo desconectamos de la voz
             if (now - globalConnectionStates[player].lastHeartbeat > 20000) {
-                console.log(`💀 [TIMEOUT] ${player} desconectado por inactividad.`);
+                console.log(`💀 [TIMEOUT] ${player} desconectado de VOZ.`);
                 globalConnectionStates[player].connected = false;
             }
         }
@@ -41,52 +36,63 @@ setInterval(() => {
 
 // --- ENDPOINTS ---
 
-// 1. La Web manda el Heartbeat aquí
+// 1. LATIDO: La web dice "Estoy en la llamada"
 app.post('/status', (req, res) => {
     const { player, inVoice } = req.body;
-    
     if (player) {
         globalConnectionStates[player] = {
             connected: inVoice,
-            lastHeartbeat: Date.now() // Actualizamos la hora
+            lastHeartbeat: Date.now()
         };
     }
     res.sendStatus(200);
 });
 
-// 2. El Addon lee todo aquí
+// 2. MINECRAFT DATA: El Addon envía posiciones y recibe estados
 app.post('/minecraft-data', async (req, res) => {
-  const mcBody = req.body; 
-  lastMinecraftData = mcBody;
-  lastUpdateTime = new Date().toISOString();
-
-  // Enviar datos posicionales a LiveKit (Web)
+  const mcBody = req.body; // { data: { "Steve": {...}, "Alex": {...} }, config: ... }
+  
+  // A. Enviar posiciones a LiveKit (Para Audio 3D en Web)
   try {
     const strData = JSON.stringify({ type: 'minecraft-update', data: mcBody.data, config: mcBody.config });
     const encoder = new TextEncoder();
     await roomService.sendData('minecraft-global', encoder.encode(strData), DataPacket_Kind.RELIABLE);
   } catch (error) {}
 
-  // Preparar respuesta para el Addon
-  const voiceStatesArray = Object.keys(globalVoiceStates).map(key => ({
-      gamertag: key,
-      ...globalVoiceStates[key]
-  }));
-
-  // Enviamos solo el estado true/false al addon
-  const connectionStatesArray = Object.keys(globalConnectionStates).map(key => ({
-      gamertag: key,
-      connected: globalConnectionStates[key].connected
-  }));
+  // B. CALCULAR ESTADOS PARA EL ADDON (AQUÍ ESTÁ LA LÓGICA QUE PEDISTE)
   
+  // Lista de jugadores que están ACTUALMENTE en el mundo (según el Addon)
+  const playersInWorld = Object.keys(mcBody.data || {});
+  
+  const finalStates = [];
+
+  playersInWorld.forEach(gamertag => {
+      // 1. Estado de Voz (Hablando/Muteado)
+      const voiceState = globalVoiceStates[gamertag] || { isTalking: false, isMuted: false };
+      
+      // 2. Estado de Conexión (¿Está en la llamada?)
+      // Buscamos si existe en la lista de conexiones y si está marcado como true
+      const connectionData = globalConnectionStates[gamertag];
+      const isConnectedToCall = connectionData ? connectionData.connected : false;
+
+      // 3. Empaquetamos todo para el Addon
+      // El Addon leerá 'isDisconnected' para poner el icono rojo
+      finalStates.push({
+          gamertag: gamertag,
+          isTalking: voiceState.isTalking,
+          isMuted: voiceState.isMuted,
+          isDisconnected: !isConnectedToCall // TRUE si NO está en la llamada
+      });
+  });
+  
+  // Enviamos al Addon SOLO lo que necesita saber de los jugadores presentes
   res.json({ 
       success: true,
-      voiceStates: voiceStatesArray,
-      connectionStates: connectionStatesArray // <--- INFO VITAL PARA EL ADDON
+      states: finalStates 
   });
 });
 
-// ... (Resto de endpoints /token y /voice-status igual que antes) ...
+// ... (Resto de endpoints /token y /voice-status igual) ...
 app.post('/token', async (req, res) => {
   const { roomName, participantName } = req.body;
   const at = new AccessToken(LK_API_KEY, LK_API_SECRET, { identity: participantName });
