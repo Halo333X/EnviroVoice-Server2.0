@@ -41,6 +41,18 @@ app.get('/minecraft-data', (req, res) => {
   });
 });
 
+app.post('/status', (req, res) => {
+    const { player, inVoice } = req.body;
+    if (minecraftSocket) {
+        minecraftSocket.send(JSON.stringify({
+            type: "VOICE_STATUS",
+            player: player,
+            connected: inVoice
+        }));
+    }
+    res.sendStatus(200);
+});
+
 // 1. ENDPOINT: Generar Token
 app.post('/token', async (req, res) => {
   const { roomName, participantName } = req.body;
@@ -123,3 +135,4 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
