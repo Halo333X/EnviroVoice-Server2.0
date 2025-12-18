@@ -146,19 +146,34 @@ app.post('/minecraft-data', async (req, res) => {
 
 // 2. NUEVO: MÉTODO GET (Para verificar manualmente desde el navegador)
 app.get('/minecraft-data', (req, res) => {
+    
+    const usersInWeb = Object.keys(globalVoiceStates);
+    const usersInGame = lastMinecraftData && lastMinecraftData.data 
+                        ? Object.keys(lastMinecraftData.data) 
+                        : [];
+
+    const comparisonDebug = usersInWeb.map(gamertag => {
+        const isConnected = usersInGame.includes(gamertag);
+        
+        return {
+            gamertag: gamertag,
+            icon_result: isConnected ? "✅ CONNECTED" : "🔌 DISCONNECTED",
+            details: {
+                in_web_call: true,
+                in_minecraft_world: isConnected
+            }
+        };
+    });
+
     res.json({
-        status: "active",
-        last_updated: lastUpdateTime || "Never",
-        data_cached: lastMinecraftData || "No data received yet",
-        active_voice_users: Object.keys(globalVoiceStates).length
+        info: "Depuración de Lógica de Conexión",
+        last_update_from_game: lastUpdateTime || "Esperando datos...",
+        
+        comparison_result: comparisonDebug,
+
+        debug_raw_lists: {
+            web_users: usersInWeb,
+            minecraft_players: usersInGame
+        }
     });
 });
-
-// -------------------------------------------------------------------------
-// INICIO DEL SERVIDOR
-// -------------------------------------------------------------------------
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
-
