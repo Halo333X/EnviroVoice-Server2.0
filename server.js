@@ -127,10 +127,20 @@ app.post('/minecraft-data', async (req, res) => {
       gamertag: key,
       ...globalVoiceStates[key]
   }));
+
+  const connectionStatesArray = Object.keys(globalVoiceStates).map(gamertag => {
+      const isInGame = mcBody.data && mcBody.data[gamertag] !== undefined;
+      
+      return {
+          gamertag: gamertag,
+          connected: isInGame
+      };
+  });
   
   res.json({ 
       success: true,
-      voiceStates: voiceStatesArray
+      voiceStates: voiceStatesArray,
+      connectionStates: connectionStatesArray // <--- ¡AQUÍ ESTÁ LA CLAVE!
   });
 });
 
@@ -151,3 +161,4 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
