@@ -11,7 +11,7 @@ dotenv.config();
 const app = express();
 
 app.use(cors({
-  origin: '*', 
+  origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
@@ -25,12 +25,12 @@ const LK_API_KEY = process.env.LIVEKIT_API_KEY;
 const LK_API_SECRET = process.env.LIVEKIT_API_SECRET;
 const LK_URL = process.env.LIVEKIT_URL;
 
+// Inicializamos el cliente de la sala
 const roomService = new RoomServiceClient(LK_URL, LK_API_KEY, LK_API_SECRET);
 
 // -------------------------------------------------------------------------
 // ALMACENAMIENTO EN MEMORIA
 // -------------------------------------------------------------------------
-// Almacena el estado de voz (hablando/muteado) reportado por la Web App
 let globalVoiceStates = {};   
 let lastMinecraftData = null; 
 let lastUpdateTime = null;    
@@ -39,19 +39,19 @@ let lastUpdateTime = null;
 // ENDPOINTS
 // -------------------------------------------------------------------------
 
-// Endpoint de estado general (Health Check)
+// Health Check
 app.get('/status', (req, res) => {
   res.status(200).send('OK');
 });
 
 /**
- * Generación de Tokens de Acceso para LiveKit.
+ * Generación de Tokens de Acceso
  */
 app.post('/token', async (req, res) => {
   const { roomName, participantName } = req.body;
 
   if (!roomName || !participantName) {
-    return res.status(400).json({ error: 'Faltan datos requeridos (roomName, participantName)' });
+    return res.status(400).json({ error: 'Faltan datos requeridos' });
   }
 
   try {
@@ -75,7 +75,7 @@ app.post('/token', async (req, res) => {
 });
 
 /**
- * Recepción de Estado de Voz desde la Web.
+ * Recepción de Estado de Voz (Web -> Server)
  */
 app.post('/voice-status', (req, res) => {
   const { gamertag, isTalking, isMuted } = req.body;
@@ -88,20 +88,16 @@ app.post('/voice-status', (req, res) => {
 });
 
 /**
- * Puente de Datos Minecraft <-> LiveKit.
+ * Puente de Datos (Minecraft -> Server -> Web)
  */
-// 1. MÉTODO POST (Para recibir datos desde Minecraft)
 app.post('/minecraft-data', async (req, res) => {
   const mcBody = req.body; 
   
-  // Guardamos en memoria para depuración
+  // Guardamos caché
   lastMinecraftData = mcBody;
   lastUpdateTime = new Date().toISOString();
 
-  // DEBUG LOG (Opcional, para ver en consola de Render)
-  // console.log("📦 [MC-DATA] Recibido:", JSON.stringify(mcBody).substring(0, 100) + "...");
-
-  // A. Reenvío de datos a la sala de LiveKit
+  // A. Reenvío a LiveKit (Data Packet)
   try {
     const strData = JSON.stringify({
       type: 'minecraft-update',
@@ -117,18 +113,19 @@ app.post('/minecraft-data', async (req, res) => {
         payload,
         DataPacket_Kind.RELIABLE 
     );
-
   } catch (error) {
-     // Ignorar errores si la sala está vacía
+     // Ignoramos errores de sala vacía
   }
 
-  // B. Respuesta al Addon
+  // B. Respuesta al Addon (Con cálculo de conexión)
   const voiceStatesArray = Object.keys(globalVoiceStates).map(key => ({
       gamertag: key,
       ...globalVoiceStates[key]
   }));
 
+  // Aquí está la magia que arregla el icono rojo
   const connectionStatesArray = Object.keys(globalVoiceStates).map(gamertag => {
+      // ¿Este usuario de la web está también en el mundo de Minecraft?
       const isInGame = mcBody.data && mcBody.data[gamertag] !== undefined;
       
       return {
@@ -140,11 +137,11 @@ app.post('/minecraft-data', async (req, res) => {
   res.json({ 
       success: true,
       voiceStates: voiceStatesArray,
-      connectionStates: connectionStatesArray // <--- ¡AQUÍ ESTÁ LA CLAVE!
+      connectionStates: connectionStatesArray 
   });
 });
 
-// 2. NUEVO: MÉTODO GET (Para verificar manualmente desde el navegador)
+// 2. NUEVO: MÉTODO GET (Visor de Depuración)
 app.get('/minecraft-data', (req, res) => {
     
     const usersInWeb = Object.keys(globalVoiceStates);
@@ -176,4 +173,12 @@ app.get('/minecraft-data', (req, res) => {
             minecraft_players: usersInGame
         }
     });
+});
+
+// -------------------------------------------------------------------------
+// INICIO
+// -------------------------------------------------------------------------
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });
