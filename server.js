@@ -39,10 +39,13 @@ let lastUpdateTime = null;
 // ENDPOINTS
 // -------------------------------------------------------------------------
 
+// Endpoint de estado general (Health Check)
+app.get('/status', (req, res) => {
+  res.status(200).send('OK');
+});
+
 /**
  * Generación de Tokens de Acceso para LiveKit.
- * Recibe: nombre de sala y nombre de participante.
- * Retorna: Token JWT y URL del servidor WebSocket.
  */
 app.post('/token', async (req, res) => {
   const { roomName, participantName } = req.body;
@@ -73,7 +76,6 @@ app.post('/token', async (req, res) => {
 
 /**
  * Recepción de Estado de Voz desde la Web.
- * Actualiza si un jugador está hablando o muteado.
  */
 app.post('/voice-status', (req, res) => {
   const { gamertag, isTalking, isMuted } = req.body;
@@ -87,17 +89,19 @@ app.post('/voice-status', (req, res) => {
 
 /**
  * Puente de Datos Minecraft <-> LiveKit.
- * 1. Recibe posiciones desde el Addon (Minecraft).
- * 2. Reenvía esas posiciones a la Web App vía LiveKit Data Packet.
- * 3. Responde al Addon con el estado de voz actual de los jugadores.
  */
+// 1. MÉTODO POST (Para recibir datos desde Minecraft)
 app.post('/minecraft-data', async (req, res) => {
   const mcBody = req.body; 
   
+  // Guardamos en memoria para depuración
   lastMinecraftData = mcBody;
   lastUpdateTime = new Date().toISOString();
 
-  // A. Reenvío de datos a la sala de LiveKit (Para Audio 3D en Web)
+  // DEBUG LOG (Opcional, para ver en consola de Render)
+  // console.log("📦 [MC-DATA] Recibido:", JSON.stringify(mcBody).substring(0, 100) + "...");
+
+  // A. Reenvío de datos a la sala de LiveKit
   try {
     const strData = JSON.stringify({
       type: 'minecraft-update',
@@ -115,10 +119,10 @@ app.post('/minecraft-data', async (req, res) => {
     );
 
   } catch (error) {
-     // Se ignoran errores de envío si la sala está vacía para evitar spam en logs
+     // Ignorar errores si la sala está vacía
   }
 
-  // B. Respuesta al Addon (Solo estados de voz necesarios para Nametags)
+  // B. Respuesta al Addon
   const voiceStatesArray = Object.keys(globalVoiceStates).map(key => ({
       gamertag: key,
       ...globalVoiceStates[key]
@@ -128,6 +132,16 @@ app.post('/minecraft-data', async (req, res) => {
       success: true,
       voiceStates: voiceStatesArray
   });
+});
+
+// 2. NUEVO: MÉTODO GET (Para verificar manualmente desde el navegador)
+app.get('/minecraft-data', (req, res) => {
+    res.json({
+        status: "active",
+        last_updated: lastUpdateTime || "Never",
+        data_cached: lastMinecraftData || "No data received yet",
+        active_voice_users: Object.keys(globalVoiceStates).length
+    });
 });
 
 // -------------------------------------------------------------------------
